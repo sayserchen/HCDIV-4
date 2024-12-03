@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to bottom, #001f3f, #003366); /* 深蓝背景 */
+      margin: 0;
+      padding: 0;
+    }
+    h1 {
+      text-align: center;
+      font-family: 'Bebas Neue', Times, serif;
+      color: #ffffff;
+      margin-top: 20px;
+      margin-bottom: 20px;
+    }
+    #tooltip {
+      position: absolute;
+      background: rgba(50, 50, 50, 0.9);
+      color: #fff;
+      border-radius: 5px;
+      padding: 10px;
+      font-size: 12px;
+      pointer-events: none;
+      box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
+      z-index: 10;
+    }
+    .reset-button {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background-color: #ff851b;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    .reset-button:hover {
+      background-color: #ff6600;
+      transform: scale(1.05);
+    }
+    #legend {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      padding: 10px;
+      box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
+      font-size: 12px;
+    }
+    #legend div {
+      display: flex;
+      align-items: center;
+      margin-top: 5px;
+    }
+    #legend div div {
+      width: 20px;
+      height: 20px;
+      margin-right: 5px;
+    }
+    #search-bar {
+      position: absolute;
+      top: 20px; /* 搜索框顶部 */
+      left: 20px; /* 搜索框左侧 */
+      display: flex;
+      gap: 10px;
+      z-index: 5; /* 确保不被地图遮挡 */
+    }
+    #search-input {
+      width: 250px;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      outline: none;
+      font-size: 14px;
+    }
+    #search-button {
+      padding: 10px 15px;
+      background-color: #0074d9;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #search-button:hover {
+      background-color: #005bb5;
+    }
+    svg {
+      display: block;
+      margin: auto;
+    }
+    path.highlight {
+      stroke: yellow !important; /* 改为黄色 */
+      stroke-width: 3 !important;
+      filter: drop-shadow(0 0 10px yellow); /* 发光效果 */
+    }
+  </style>
+</head>
+<body>
+<h1>Singapore Population Map</h1>
+<div id="search-bar">
+  <input id="search-input" type="text" placeholder="Enter Subzone Name" />
+  <button id="search-button">Search</button>
+</div>
+<button class="reset-button">Reprovision</button>
+<svg></svg>
+<div id="tooltip"></div>
+<div id="legend">
+  <strong>POPULATION SIZE</strong>
+  <svg width="150" height="20" style="display: block; margin-top: 10px;"></svg>
+  <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+    <span id="legend-min">0</span>
+    <span id="legend-max">0</span>
+  </div>
+</div>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+let width = 1000, height = 600;
+
+let svg = d3.select("svg")
+    .attr("viewBox", "0 0 " + width + " " + height);
+
+Promise.all([d3.json("sgmap.json"), d3.csv("population2023.csv")]).then(data => {
+    let mapData = data[0].features;
+    let popData = data[1];
+
+    mapData.forEach(d => {
+        let subzone = popData.find(e => e.Subzone.toUpperCase() == d.properties.Name.toUpperCase());
+        d.popdata = (subzone != undefined) ? parseInt(subzone.Population) : 0;
+    });
+
+    let projection = d3.geoMercator()
+        .center([103.851959, 1.290270])
+        .fitExtent([[20, 20], [980, 580]], data[0]);
+
+    let geopath = d3.geoPath().projection(projection);
+
+    let colorScale = d3.scaleSequential(d3.interpolatePurples)
+        .domain([0, d3.max(mapData, d => d.popdata)]);
+
+    let tooltip = d3.select("#tooltip");
+    let g = svg.append("g").attr("id", "districts");
+
+    g.selectAll("path")
+        .data(mapData)
+        .enter()
+        .append("path")
+        .attr("d", geopath)
+        .attr("stroke", "lightgrey")
+        .attr("stroke-width", 1)
+        .attr("fill", d => colorScale(d.popdata))
+        .on("mouseover", (event, d) => {
+            d3.select(event.target).attr("stroke-width", 2).attr("stroke", "yellow"); /* 改为黄色 */
+            tooltip.style("display", "block")
+                   .html(`<strong>${d.properties.Name}</strong><br>Population: ${d.popdata}`);
+        })
+        .on("mousemove", event => {
+            tooltip.style("left", (event.pageX + 10) + "px")
+                   .style("top", (event.pageY - 20) + "px");
+        })
+        .on("mouseout", event => {
+            d3.select(event.target).attr("stroke-width", 1).attr("stroke", "lightgrey");
+            tooltip.style("display", "none");
+        })
+        .on("click", (event, d) => {
+            d3.selectAll("path").classed("highlight", false);
+            d3.select(event.target).classed("highlight", true);
+        });
+
+    let zoom = d3.zoom()
+        .scaleExtent([1, 8])
+        .on("zoom", (event) => {
+            g.attr("transform", event.transform);
+        });
+
+    svg.call(zoom);
+
+    d3.select(".reset-button").on("click", () => {
+        d3.selectAll("path").classed("highlight", false);
+        svg.transition()
+            .duration(750)
+            .call(zoom.transform, d3.zoomIdentity);
+    });
+
+    d3.select("#search-button").on("click", () => {
+        let query = document.getElementById("search-input").value.trim().toUpperCase();
+        let match = mapData.find(d => d.properties.Name.toUpperCase() === query);
+
+        if (match) {
+            d3.selectAll("path").classed("highlight", false);
+            g.selectAll("path").filter(d => d === match).classed("highlight", true);
+
+            let [[x0, y0], [x1, y1]] = geopath.bounds(match);
+
+            svg.transition()
+                .duration(750)
+                .call(
+                    zoom.transform,
+                    d3.zoomIdentity
+                        .translate(width / 2, height / 2)
+                        .scale(Math.min(8, 0.9 / Math.max((x1 - x0) / width, (y1 - y0) / height)))
+                        .translate(-(x0 + x1) / 2, -(y0 + y1) / 2)
+                );
+        } else {
+            alert("No matching subzone found.");
+        }
+    });
+
+    // Update the legend
+    let legendSvg = d3.select("#legend svg");
+    let gradient = legendSvg.append("defs")
+        .append("linearGradient")
+        .attr("id", "gradient")
+        .attr("x1", "0%")
+        .attr("x2", "100%")
+        .attr("y1", "0%")
+        .attr("y2", "0%");
+
+    let legendColors = d3.range(0, 1.01, 0.01);
+    legendColors.forEach((t, i) => {
+        gradient.append("stop")
+            .attr("offset", `${i}%`)
+            .attr("stop-color", d3.interpolatePurples(t));
+    });
+
+    legendSvg.append("rect")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", 150)
+        .attr("height", 20)
+        .style("fill", "url(#gradient)");
+
+    d3.select("#legend-min").text(0);
+    d3.select("#legend-max").text(d3.max(mapData, d => d.popdata));
+});
+</script>
+</body>
+</html>
